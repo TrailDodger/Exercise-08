@@ -1,0 +1,271 @@
+---
+title: "Exercise8"
+format: html
+editor: visual
+---
+
+## Quarto
+
+Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+
+## Running Code
+
+When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+
+```{r}
+1 + 1
+```
+
+You can add options to executable code like this
+
+```{r}
+#| echo: false
+2 * 2
+```
+
+The `echo: false` option disables the printing of code (only output is displayed).
+
+# Exercise 08- Practice Simple Linear Regression
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+library(dplyr)
+```
+
+```{r}
+library(readr)
+```
+
+```{r}
+f <- "https://raw.githubusercontent.com/difiore/ada-datasets/main/Street_et_al_2017.csv"
+```
+
+```{r}
+d <- read_csv(f, col_names=TRUE)
+```
+
+```{r}
+library(skimr)
+```
+
+```{r}
+skim(d)
+```
+
+Above, I loaded in the data for this exercise by linking variable 'f' to the URL included in the exercise instructions, read the file in as a tibble under variable 'd', and ran the skim function to look at the summary of each quantitative variable.
+
+### Step 2- plot brain size as a function of social group size, group size, longevity, juvenile period length, and reproductive lifespan
+
+```{r}
+library(ggplot2)
+
+plot_list <- list(
+  ggplot(d, aes(x = Group_size, y = ECV)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = TRUE) +
+    labs(title = "Brain Size vs Group Size", x = "Group Size", y = "Brain Size"),
+  
+  ggplot(d, aes(x = Longevity, y = ECV)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = TRUE) +
+    labs(title = "Brain Size vs Longevity", x = "Longevity", y = "Brain Size"),
+  
+  ggplot(d, aes(x = Weaning, y = ECV)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = TRUE) +
+    labs(title = "Brain Size vs Weaning Age", x = "Weaning Age", y = "Brain Size"),
+  
+  ggplot(d, aes(x = Repro_lifespan, y = ECV)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = TRUE) +
+    labs(title = "Brain Size vs Reproductive Lifespan", x = "Reproductive Lifespan", y = "Brain Size")
+)
+
+for (plot in plot_list) {
+  print(plot)
+}
+```
+
+Looking at the social group size variable, lets look at the OLS coefficients..
+
+```{r}
+data_clean <- d %>% 
+  select(ECV, Group_size) %>% 
+  drop_na()
+```
+
+```{r}
+X_mean <- mean(data_clean$Group_size)
+Y_mean <- mean(data_clean$ECV)
+```
+
+```{r}
+beta_1 <- sum((data_clean$Group_size - X_mean) * (data_clean$ECV - Y_mean)) / sum((data_clean$Group_size - X_mean)^2)
+```
+
+```{r}
+beta_0 <- Y_mean - beta_1 * X_mean
+```
+
+```{r}
+beta_0
+```
+
+```{r}
+beta_1
+```
+
+```{r}
+lm(data_clean)
+```
+
+Above are steps 3 and 4, where the beta coefficients were calculated by hand and using the lm() function, yielding the same results!
+
+```{r}
+data_clean <- d %>% 
+  select(ECV, Group_size, Taxonomic_group) %>% 
+  drop_na()
+```
+
+```{r}
+coefficients <- function(df) {
+  X_mean <- mean(df$Group_size)
+  Y_mean <- mean(df$ECV)
+  
+  beta_1 <- sum((df$Group_size - X_mean) * (df$ECV - Y_mean)) / 
+            sum((df$Group_size - X_mean)^2)
+  beta_0 <- Y_mean - beta_1 * X_mean
+  
+  return(c(beta_0, beta_1))
+}
+```
+
+```{r}
+coefficients_by_group <- data_clean %>%
+  group_by(Taxonomic_group) %>%
+  summarise(
+    beta_0 = coefficients(cur_data())[1],
+    beta_1 = coefficients(cur_data())[2]
+  )
+```
+
+```{r}
+print(coefficients_by_group)
+```
+
+Above is step 5 of the exercise, which shows that the Beta0 value, the intercept, is pretty different across species but beta1, the slope, is not hugely dissimilar. This would indicate to me that Catarrhini is larger as a species than Platyrrhini or Strepsirhini, but the relationship between group size and brain size is pretty consistent across those species.
+
+```{r}
+(model <- lm(ECV ~ Group_size * Taxonomic_group, data = data_clean))
+```
+
+Going back to ECV as a function of social group size, lets look at the standard error, 95% confidence intervals, and the p value. Since I calculated slope and intercept earlier, I'm just going to quickly rerun those code chunks associated with ECV \~ Group_size and go from there.
+
+```{r}
+yhat <- beta_0 + beta_1 * data_clean$Group_size
+```
+
+```{r}
+residual <- data_clean$ECV - yhat
+```
+
+```{r}
+n <- length(data_clean$ECV)
+```
+
+```{r}
+sigma <- sqrt(sum(residual^2) / (n - 2))
+```
+
+```{r}
+(beta_1se <- sigma / sqrt(sum((data_clean$Group_size - mean(data_clean$Group_size))^2)))
+```
+
+```{r}
+t_stat <- beta_1 / beta_1se
+```
+
+```{r}
+df <- n - 2 
+(p_value <- 2 * pt(-abs(t_stat), df))
+```
+
+```{r}
+t_val <- qt(0.975, df)
+(lower_CI <- beta_1 - t_val * beta_1se)
+(upper_CI <- beta_1 + t_val * beta_1se)
+```
+
+```{r}
+summary(lm(ECV ~ Group_size, data = data_clean))
+```
+
+With that calculated, next I will generate 1000 permutations. I will be permuting the brain size (ECV) values to create random relationships between that variable and group size.
+
+```{r}
+nperm <- 1000
+```
+
+```{r}
+permslope <- numeric(nperm)
+```
+
+```{r}
+set.seed(42)
+for (i in 1:nperm){
+  permuted_ECV <- sample(data_clean$ECV)
+  permutation <- lm(permuted_ECV ~ data_clean$Group_size)
+  permslope[i] <- coef(permutation)["data_clean$Group_size"]
+}
+```
+
+```{r}
+(perm_p <- mean(abs(permslope) >= abs(beta_1)))
+```
+
+```{r}
+(perm_se <- sd(permslope))
+```
+
+So the p value from our observed model was close to 0, 7.25e11, significant at the 0 level. It seems that the permuted model yields a p value at the same significance level.
+
+### Last step-  use bootstrapping for 95% confidence intervals
+
+```{r}
+bootstrap_n <- 1000
+bootstrap_slopes <- numeric(bootstrap_n)
+```
+
+```{r}
+set.seed(42) 
+for (i in 1:bootstrap_n) {
+  resample_data <- data_clean %>% 
+    sample_frac(replace = TRUE)  
+  boot_model <- lm(ECV ~ Group_size, data = resample_data)
+  bootstrap_slopes[i] <- coef(boot_model)["Group_size"]
+}
+```
+
+```{r}
+CI_lower <- quantile(bootstrap_slopes, 0.025)
+CI_upper <- quantile(bootstrap_slopes, 0.975)
+```
+
+```{r}
+CI_lower
+CI_upper
+```
+
+```{r}
+boot_se <- sd(bootstrap_slopes)
+```
+
+```{r}
+(lowerci <- beta_1 - 1.96 * boot_se)
+(upperci <- beta_1 + 1.96 * boot_se)
+```
+
+It seems that the slope is significantly different from zero so we can conclude that there is a relationship between social group size and brain size.
